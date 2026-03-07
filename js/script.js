@@ -5,14 +5,68 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
+  // ─── Security: Input Sanitization ───
+  function sanitize(str) {
+    return str.replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  // ─── Page Transition System ───
+  (function initPageTransitions() {
+    // Create overlay if not present
+    if (!document.querySelector('.page-transition-overlay')) {
+      const overlay = document.createElement('div');
+      overlay.className = 'page-transition-overlay';
+      overlay.innerHTML = `
+        <div class="curtain-left"></div>
+        <div class="curtain-right"></div>
+        <div class="transition-logo">MS GLOBAL <span>VISA</span><span class="transition-spinner"></span></div>`;
+      document.body.appendChild(overlay);
+    }
+
+    // Intercept navigation links for smooth transition
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a');
+      if (!link) return;
+      const href = link.getAttribute('href');
+      if (!href || href === 'javascript:void(0)' ||
+          href.startsWith('javascript') || href.startsWith('mailto') ||
+          href.startsWith('tel') || href.startsWith('https://wa.me') ||
+          href.startsWith('https://instagram') ||
+          link.getAttribute('target') === '_blank') return;
+      // Allow pure hash links to scroll normally
+      if (href.startsWith('#')) return;
+      // Links like ../index.html#contact should navigate normally (no transition needed)
+      if (href.includes('#')) return;
+
+      e.preventDefault();
+      const overlay = document.querySelector('.page-transition-overlay');
+      if (overlay) {
+        overlay.classList.add('active');
+        setTimeout(() => { window.location.href = href; }, 900);
+      } else {
+        window.location.href = href;
+      }
+    });
+  })();
+
   // ─── Loading Screen ───
   const loadingScreen = document.querySelector('.loading-screen');
   if (loadingScreen) {
+    // Hide body content until loader is done
     document.body.style.opacity = '1';
     setTimeout(() => {
       loadingScreen.classList.add('loaded');
-      setTimeout(() => loadingScreen.style.display = 'none', 600);
+      setTimeout(() => {
+        loadingScreen.style.display = 'none';
+        // Only start page entrance after loader is gone
+        document.body.classList.add('page-enter');
+      }, 500);
     }, 1800);
+  } else {
+    // No loading screen (sub-pages), animate in immediately
+    document.body.classList.add('page-enter');
   }
 
   // ─── Toast Notification System ───
@@ -28,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     toast.className = `toast ${type}`;
     toast.innerHTML = `
       <i class="fas ${icons[type] || icons.info} toast-icon"></i>
-      <span class="toast-message">${message}</span>
+      <span class="toast-message">${sanitize(message)}</span>
       <button class="toast-close" onclick="this.parentElement.classList.add('removing');setTimeout(()=>this.parentElement.remove(),300)"><i class="fas fa-times"></i></button>`;
     container.appendChild(toast);
     setTimeout(() => { toast.classList.add('removing'); setTimeout(() => toast.remove(), 300); }, 4000);
@@ -185,7 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
     div.className = `chat-msg ${sender}`;
     div.innerHTML = `
       <div class="chat-avatar">${avatarIcon}</div>
-      <div class="chat-bubble"><p>${text}</p><span class="chat-time">${time}</span></div>`;
+      <div class="chat-bubble"><p>${sanitize(text)}</p><span class="chat-time">${time}</span></div>`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
@@ -217,12 +271,12 @@ document.addEventListener('DOMContentLoaded', () => {
     newsletterForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const email = newsletterForm.querySelector('input').value.trim();
-      if (email && email.includes('@')) {
-        showToast('Thank you for subscribing! 🎉', 'success');
-        newsletterForm.querySelector('input').value = '';
-      } else {
+      if (!/^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(email)) {
         showToast('Please enter a valid email address.', 'error');
+        return;
       }
+      showToast('Thank you for subscribing! 🎉', 'success');
+      newsletterForm.querySelector('input').value = '';
     });
   }
 
@@ -237,26 +291,31 @@ document.addEventListener('DOMContentLoaded', () => {
       const serviceSelect = contactForm.querySelector('select');
       const occupationField = contactForm.querySelector('textarea[name="occupation"]');
       const messageField = contactForm.querySelector('textarea[name="message"]');
-      if (name && name.value.trim() && phone && phone.value.trim()) {
-        // Save to localStorage for admin panel
-        const messages = JSON.parse(localStorage.getItem('ev_messages') || '[]');
-        messages.push({
-          id: Date.now(),
-          name: name.value.trim(),
-          email: email ? email.value.trim() : '',
-          phone: phone.value.trim(),
-          service: serviceSelect ? serviceSelect.value : 'General',
-          occupation: occupationField ? occupationField.value.trim() : '',
-          message: messageField ? messageField.value.trim() : '',
-          date: new Date().toLocaleString(),
-          status: 'new'
-        });
-        localStorage.setItem('ev_messages', JSON.stringify(messages));
-        showToast('Message sent successfully! We\'ll contact you within 24 hours.', 'success');
-        contactForm.reset();
-      } else {
+      // Validate fields
+      if (!name || !name.value.trim() || !phone || !phone.value.trim() || !occupationField || !occupationField.value.trim() || !messageField || !messageField.value.trim()) {
         showToast('Please fill in all required fields.', 'error');
+        return;
       }
+      if (email && email.value.trim() && !/^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(email.value.trim())) {
+        showToast('Please enter a valid email address.', 'error');
+        return;
+      }
+      // Save sanitized data to localStorage for admin panel
+      const messages = JSON.parse(localStorage.getItem('ev_messages') || '[]');
+      messages.push({
+        id: Date.now(),
+        name: sanitize(name.value.trim()),
+        email: email ? sanitize(email.value.trim()) : '',
+        phone: sanitize(phone.value.trim()),
+        service: serviceSelect ? sanitize(serviceSelect.value) : 'General',
+        occupation: occupationField ? sanitize(occupationField.value.trim()) : '',
+        message: messageField ? sanitize(messageField.value.trim()) : '',
+        date: new Date().toLocaleString(),
+        status: 'new'
+      });
+      localStorage.setItem('ev_messages', JSON.stringify(messages));
+      showToast('Message sent successfully! We\'ll contact you within 24 hours.', 'success');
+      contactForm.reset();
     });
   }
 
